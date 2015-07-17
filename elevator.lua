@@ -2,6 +2,16 @@
 -- The network name is determined automaticly from the position (x/z coordinates).
 -- >utor: Sokomine
 
+local function place_top(bottom_pos)
+	local top_pos = vector.new(bottom_pos.x, bottom_pos.y+1, bottom_pos.z)
+	local bottom_node = minetest.env:get_node_or_nil(bottom_pos)
+	local facedir = bottom_node.param2
+	local top_node = minetest.env:get_node_or_nil(top_pos)
+	if top_node and top_node.name == "air" then
+		minetest.add_node(top_pos, {name="travelnet:elevator_top", paramtype2="facedir", param2=facedir})
+	end
+end
+
 minetest.register_node("travelnet:elevator", {
     description = "Elevator",
 
@@ -60,14 +70,19 @@ minetest.register_node("travelnet:elevator", {
 --                            "field[0.3,7.6;6,0.7;owner_name;(optional) owned by:;]"..
                             "button_exit[6.3,6.2;1.7,0.7;station_set;Store]" );
 
-       local p = {x=pos.x, y=pos.y+1, z=pos.z}
-       local p2 = minetest.dir_to_facedir(placer:get_look_dir())
-       minetest.add_node(p, {name="travelnet:elevator_top", paramtype2="facedir", param2=p2})
+		local p = {x=pos.x, y=pos.y+1, z=pos.z}
+		place_top(pos)
     end,
     
     on_receive_fields = travelnet.on_receive_fields,
     on_punch          = function(pos, node, puncher)
                           travelnet.update_formspec(pos, puncher:get_player_name())
+		local top_pos = vector.new(pos.x, pos.y+1, pos.z)
+		top_node = minetest.env:get_node_or_nil(top_pos)
+		if top_node and top_node.name == "air" then
+			-- if the top node is missing, add it again
+			place_top(pos)
+		end
     end,
 
     can_dig = function( pos, player )
