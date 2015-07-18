@@ -59,10 +59,17 @@
 
 minetest.register_privilege("travelnet_attach", { description = "allows to attach travelnet boxes to travelnets of other players", give_to_singleplayer = false});
 minetest.register_privilege("travelnet_remove", { description = "allows to dig travelnet boxes which belog to nets of other players", give_to_singleplayer = false});
+minetest.register_privilege("travelnet_share", { description = "always attaches travelnet boxes to travelnets of other players", give_to_singleplayer = false});
+
+
 
 travelnet = {};
 
 travelnet.targets = {};
+
+
+
+
 
 
 -- read the configuration
@@ -102,15 +109,76 @@ travelnet.restore_data = function()
 end
 
 
+travelnet.get_stations_in_network = function (owner_name, station_network)
+   
+   local stations = {};
+   local names = {}
+   local duplicates = {}  
+   local owner_share = minetest.check_player_privs(owner_name, {travelnet_share=true}) 
+   for ko,vo in pairs(travelnet.targets) do
+  
+
+      if minetest.check_player_privs(ko, {travelnet_share=true}) or owner_share or ko == owner_name then
+         if vo[station_network] then
+   
+            for k,v in pairs( vo[ station_network ] ) do
+               if names[k] then
+                  if names[k].duplicate == false then
+                     duplicates[k ..  " (".. names[k].first_owner ..")"] = {station = k, owner = names[k].first_owner, network =station_network}
+                  end
+                  names[k].duplicate = true
+                  duplicates[k ..  " (".. ko ..")"] = {station = k, owner = ko, network =station_network}
+               else
+                  names[k] = {first_owner = ko, duplicate = false}
+               end
+               table.insert( stations, {name = k, object = v, owner=ko} );
+            end
+         end
+
+      end 
+  
+   end
+   return {stations=stations, duplicates=duplicates,station_names=names}
+
+end
+
+
+travelnet.get_station_in_network = function (owner_name, station_network, search_param)
+
+   local owner_share = minetest.check_player_privs(owner_name, {travelnet_share=true})
+   for ko,vo in pairs(travelnet.targets) do
+
+
+      if minetest.check_player_privs(ko, {travelnet_share=true}) or owner_share or ko == owner_name then
+         if vo[station_network] then
+
+            for k,v in pairs( vo[ station_network ] ) do
+               if search_param.target == "nr" and search_param.value == v.nr then
+                  return {name = k, owner = ko, object=v}
+
+               elseif search_param.target == "name" and search_param.value == k then
+		  return {name = k, owner = ko, object=v}
+               end
+            end
+         end
+
+      end
+
+   end
+   return nil
+
+end
+
 
 
 travelnet.update_formspec = function( pos, puncher_name )
+
 
    local meta = minetest.get_meta(pos);
 
    local this_node   = minetest.get_node( pos );
    local is_elevator = false;
-
+   
    if( this_node ~= nil and this_node.name == 'travelnet:elevator' ) then
       is_elevator = true;
    end 
@@ -122,6 +190,13 @@ travelnet.update_formspec = function( pos, puncher_name )
    local owner_name      = meta:get_string( "owner" );
    local station_name    = meta:get_string( "station_name" );
    local station_network = meta:get_string( "station_network" );
+   
+   if this_node and this_node.name == "ignore" and owner_name and station_name and station_network and  travelnet.targets[ owner_name ] and travelnet.targets[ owner_name ][station_network] and travelnet.targets[ owner_name ][station_network][station_name] then
+      if this_station.nr then
+         is_elevator = true;
+         
+      end
+   end
 
    if(  not( owner_name ) 
      or not( station_name ) or station_network == ''
@@ -196,39 +271,52 @@ travelnet.update_formspec = function( pos, puncher_name )
    local y = 0;
    local i = 0;
 
+   -- collect all stations in a table
+  
 
-   -- collect all station names in a table
-   local stations = {};
+
+   local network = travelnet.get_stations_in_network(owner_name, station_network)
+
+                  
+   local stations = network.stations
    
-   for k,v in pairs( travelnet.targets[ owner_name ][ station_network ] ) do
-      table.insert( stations, k );
-   end
    -- minetest.chat_send_player(puncher_name, "stations: "..minetest.serialize( stations ));
     
    local ground_level = 1;
+   
    if( is_elevator ) then
-      table.sort( stations, function(a,b) return travelnet.targets[ owner_name ][ station_network ][ a ].pos.y > 
-                                                 travelnet.targets[ owner_name ][ station_network ][ b ].pos.y  end);
+      
+												 
+												 
+	  table.sort( stations, function(a,b) return a.object.pos.y > 
+                                                  b.object.pos.y  end);
       -- find ground level
-      local vgl_timestamp = 999999999999;
+     
+	  
+	  vgl_timestamp = 999999999999;
       for index,k in ipairs( stations ) do
-         if( travelnet.targets[ owner_name ][ station_network ][ k ].timestamp < vgl_timestamp ) then
-            vgl_timestamp = travelnet.targets[ owner_name ][ station_network ][ k ].timestamp;       
+         if( k.object.timestamp < vgl_timestamp ) then
+            vgl_timestamp = k.object.timestamp;       
             ground_level  = index;
          end
       end
+	  
+	  
+	  
+	  
       for index,k in ipairs( stations ) do
          if( index == ground_level ) then
-            travelnet.targets[ owner_name ][ station_network ][ k ].nr = 'G';
+            k.object.nr = 'G';
          else
-            travelnet.targets[ owner_name ][ station_network ][ k ].nr = tostring( ground_level - index );
+            k.object.nr = tostring( ground_level - index );
          end
       end
             
    else 
       -- sort the table according to the timestamp (=time the station was configured)
-      table.sort( stations, function(a,b) return travelnet.targets[ owner_name ][ station_network ][ a ].timestamp < 
-                                                 travelnet.targets[ owner_name ][ station_network ][ b ].timestamp  end);
+     
+	  table.sort( stations, function(a,b) return a.object.timestamp < 
+                                                 b.object.timestamp  end);
    end
 
    -- if there are only 8 stations (plus this one), center them in the formspec
@@ -236,15 +324,24 @@ travelnet.update_formspec = function( pos, puncher_name )
       x = 4;
    end
 
+
+   this_station = travelnet.targets[ owner_name ][station_network][station_name]
+   this_station.duplicates = {}
    for index,k in ipairs( stations ) do 
+      local duplicate = false
+      local alt_name = k.name
+      if network.station_names[k.name].duplicate == true then
+         duplicate = true
+         alt_name =  k.name ..  " (".. k.owner ..")"
+      end 
 
       -- check if there is an elevator door in front that needs to be opened
       local open_door_cmd = false;
-      if( k==station_name ) then
+      if( k.name==station_name and k.owner == owner_name ) then
          open_door_cmd = true;
       end
 
-      if( k ~= station_name or open_door_cmd) then 
+      if( k.name ~= station_name or open_door_cmd or duplicate) then 
          i = i+1;
 
          -- new column
@@ -252,15 +349,28 @@ travelnet.update_formspec = function( pos, puncher_name )
             x = x+4;
             y = 0;
          end
-
+		local alt_owner =""
+		
+		if  k.owner ~= owner_name then
+			
+			alt_owner = " (".. k.owner ..")"
+		
+		end
+		
+		
          if( open_door_cmd ) then
             formspec = formspec .."button_exit["..(x)..","..(y+2.5)..";1,0.5;open_door;<>]"..
-                                  "label["..(x+0.9)..","..(y+2.35)..";"..tostring( k ).."]";
+                                  "label["..(x+0.9)..","..(y+2.35)..";"..tostring( k.name ).. tostring(alt_owner) .."]";
          elseif( is_elevator ) then
-            formspec = formspec .."button_exit["..(x)..","..(y+2.5)..";1,0.5;target;"..tostring( travelnet.targets[ owner_name ][ station_network ][ k ].nr ).."]"..
-                                  "label["..(x+0.9)..","..(y+2.35)..";"..tostring( k ).."]";
-         else
-            formspec = formspec .."button_exit["..(x)..","..(y+2.5)..";4,0.5;target;"..k.."]";
+            formspec = formspec .."button_exit["..(x)..","..(y+2.5)..";1,0.5;floor;"..tostring( k.object.nr ).."]"..
+                                  "label["..(x+0.9)..","..(y+2.35)..";"..tostring( k.name ).. tostring(alt_owner) .."]";
+        elseif  duplicate == true then
+
+            formspec = formspec .."button_exit["..(x)..","..(y+2.5)..";4,0.5;duplicate;"..alt_name .. "]"..
+								  "label["..(x+3.9)..","..(y+2.35)..";".. tostring(alt_owner) .."]";
+	else
+            formspec = formspec .."button_exit["..(x)..","..(y+2.5)..";4,0.5;target;"..k.name.."]"..
+								  "label["..(x+3.9)..","..(y+2.35)..";".. tostring(alt_owner) .."]";
          end
 
 --         if( is_elevator ) then
@@ -339,16 +449,16 @@ travelnet.add_target = function( station_name, network_name, pos, player_name, m
    end
 
    -- lua doesn't allow efficient counting here
-   local anz = 0;
-   for k,v in pairs( travelnet.targets[ owner_name ][ network_name ] ) do
+   local network = travelnet.get_stations_in_network(owner_name, network_name) 
+   local anz = #(network.stations);
+   
 
-      if( k == station_name ) then
-         minetest.chat_send_player(player_name, "Error: A station named '"..station_name.."' already exists on this network. Please choose a diffrent name!");
-         return;
-      end
+   if network.station_names[station_name] then
+      minetest.chat_send_player(player_name, "Error: A station named '"..station_name.."' already exists on this network. Please choose a diffrent name!");
+      return;
 
-      anz = anz + 1;
    end
+
 
    -- we don't want too many stations in the same network because that would get confusing when displaying the targets
    if( anz+1 > travelnet.MAX_STATIONS_PER_NETWORK ) then
@@ -359,6 +469,10 @@ travelnet.add_target = function( station_name, network_name, pos, player_name, m
      
    -- add this station
    travelnet.targets[ owner_name ][ network_name ][ station_name ] = {pos=pos, timestamp=os.time() };
+
+   
+
+
 
    -- do we have a new node to set up? (and are not just reading from a safefile?)
    if( meta ) then
@@ -378,6 +492,11 @@ travelnet.add_target = function( station_name, network_name, pos, player_name, m
 
       -- display a list of all stations that can be reached from here
       travelnet.update_formspec( pos, player_name );
+	  
+	  
+      for i,station in ipairs(network.stations) do
+         travelnet.update_formspec( station.object.pos, player_name );
+      end
 
       -- save the updated network data in a savefile over server restart
       travelnet.save_data();
@@ -449,7 +568,7 @@ travelnet.on_receive_fields = function(pos, formname, fields, player)
    end
 
 
-   if( not( fields.target )) then
+   if( not( fields.target )) and ( not( fields.floor ) ) and (not (fields.duplicate)) then
       minetest.chat_send_player(name, "Please click on the target you want to travel to.");
       return;
    end
@@ -479,31 +598,53 @@ travelnet.on_receive_fields = function(pos, formname, fields, player)
          return
       end
    end
+   
+   
+   
+   local target = nil
+   
+   local owner_share = minetest.check_player_privs(owner_name, {travelnet_share=true}) 
+   if fields.floor  then
 
-   local this_node = minetest.get_node( pos );
-   if( this_node ~= nil and this_node.name == 'travelnet:elevator' ) then 
-      for k,v in pairs( travelnet.targets[ owner_name ][ station_network ] ) do
-         if( travelnet.targets[ owner_name ][ station_network ][ k ].nr  --..' ('..tostring( travelnet.targets[ owner_name ][ station_network ][ k ].pos.y )..'m)'
-               == fields.target) then
-            fields.target = k;
-         end
+      local this_node = minetest.get_node( pos );
+      if( this_node ~= nil and this_node.name == 'travelnet:elevator' ) then 
+		  
+         target = travelnet.get_station_in_network (owner_name, station_network, {target="nr",value=fields.floor})
+ 
       end
-   end
+   elseif (fields.target) then
 
+      target = travelnet.get_station_in_network (owner_name, station_network, {target="name",value=fields.target})
+   elseif fields.duplicate then
+      local network = travelnet.get_stations_in_network(owner_name, station_network)
+
+      local dup = network.duplicates[fields.duplicate]
+
+      if dup then
+         local target_station = travelnet.targets[dup.owner][dup.network][dup.station]
+         target = {name = dup.station, owner = dup.owner, object=target_station }
+      end
+
+   end
+	
+	
 
    -- if the target station is gone
-   if( not( travelnet.targets[ owner_name ][ station_network ][ fields.target ] )) then
-
-      minetest.chat_send_player(name, "Station '"..( fields.target or "?").." does not exist (anymore?) on this network.");
+   if( not( target )) then
+		if fields.floor then
+			minetest.chat_send_player(name, "Station '"..( fields.floor or "?").." does not exist (anymore?) on this network.");
+		else
+			minetest.chat_send_player(name, "Station '"..( fields.target or "?").." does not exist (anymore?) on this network.");
+		end
       travelnet.update_formspec( pos, name );
       return;
    end
 
 
-   if( not( travelnet.allow_travel( name, owner_name, station_network, station_name, fields.target ))) then
+   if( not( travelnet.allow_travel( name, owner_name, station_network, station_name, target.name ))) then
       return;
    end
-   minetest.chat_send_player(name, "Initiating transfer to station '"..( fields.target or "?").."'.'");
+   minetest.chat_send_player(name, "Initiating transfer to station '"..( target.name or "?").."'.'");
 
 
 
@@ -518,7 +659,7 @@ travelnet.on_receive_fields = function(pos, formname, fields, player)
    travelnet.open_close_door( pos, player, 1 );
 
    -- transport the player to the target location
-   local target_pos = travelnet.targets[ owner_name ][ station_network ][ fields.target ].pos;
+   local target_pos = target.object.pos;
    player:moveto( target_pos, false);
 
    if( travelnet.travelnet_sound_enabled ) then
@@ -534,8 +675,8 @@ travelnet.on_receive_fields = function(pos, formname, fields, player)
    if( node2 ~= nil and node2.name ~= 'ignore' and node2.name ~= 'travelnet:travelnet' and node2.name ~= 'travelnet:elevator') then
 
       -- provide information necessary to identify the removed box
-      local oldmetadata = { fields = { owner           = owner_name,
-                                       station_name    = fields.target,
+      local oldmetadata = { fields = { owner           = target.owner,
+                                       station_name    = target.name,
                                        station_network = station_network }};
 
       travelnet.remove_box( target_pos, nil, oldmetadata, player );
@@ -586,6 +727,8 @@ travelnet.remove_box = function( pos, oldnode, oldmetadata, digger )
       return;
    end
 
+
+
    travelnet.targets[ owner_name ][ station_network ][ station_name ] = nil;
    
    -- inform the owner
@@ -593,6 +736,14 @@ travelnet.remove_box = function( pos, oldnode, oldmetadata, digger )
    if( digger ~= nil and owner_name ~= digger:get_player_name() ) then
       minetest.chat_send_player( digger:get_player_name(), "Station '"..station_name.."' has been REMOVED from the network '"..station_network.."'.");
    end
+
+   
+   local network = travelnet.get_stations_in_network(owner_name, station_network)
+   
+   for i,station in ipairs(network.stations) do
+      travelnet.update_formspec( station.object.pos, digger:get_player_name() );
+   end
+
 
    -- save the updated network data in a savefile over server restart
    travelnet.save_data();
