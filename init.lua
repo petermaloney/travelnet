@@ -192,7 +192,7 @@ travelnet.update_formspec = function( pos, puncher_name )
    local station_network = meta:get_string( "station_network" );
    
    if this_node and this_node.name == "ignore" and owner_name and station_name and station_network and  travelnet.targets[ owner_name ] and travelnet.targets[ owner_name ][station_network] and travelnet.targets[ owner_name ][station_network][station_name] then
-      if this_station.nr then
+      if travelnet.targets[owner_name][station_network][station_name].nr then
          is_elevator = true;
          
       end
@@ -325,8 +325,6 @@ travelnet.update_formspec = function( pos, puncher_name )
    end
 
 
-   this_station = travelnet.targets[ owner_name ][station_network][station_name]
-   this_station.duplicates = {}
    for index,k in ipairs( stations ) do 
       local duplicate = false
       local alt_name = k.name
